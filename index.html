@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Heap Simulator</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background: #f0f4f8;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .memory {
+            display: grid;
+            grid-template-columns: repeat(8, 70px);
+            grid-gap: 10px;
+            justify-content: center;
+            margin-bottom: 30px;
+        }
+
+        .cell {
+            width: 70px;
+            height: 70px;
+            background: #fff;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            position: relative;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            padding-top: 5px;
+            user-select: none;
+        }
+
+        .cell-address {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            font-size: 10px;
+            color: #888;
+        }
+
+        .cell-byte {
+            font-size: 14px;
+            font-weight: bold;
+            margin-top: 20px;
+        }
+
+        .cell-char {
+            font-size: 12px;
+            color: #555;
+            margin-top: 2px;
+        }
+
+        .tooltip {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            white-space: nowrap;
+            display: none;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .cell:hover .tooltip {
+            display: block;
+        }
+
+        /* Allocation border colors for visual distinction */
+        .alloc-string {
+            border-color: #2196F3;
+        }
+
+        .alloc-bool {
+            border-color: #FF9800;
+        }
+
+        .alloc-int8 {
+            border-color: #4CAF50;
+        }
+
+        .alloc-uint8 {
+            border-color: #4CAF50;
+        }
+
+        .alloc-int16 {
+            border-color: #8BC34A;
+        }
+
+        .alloc-uint16 {
+            border-color: #8BC34A;
+        }
+
+        .alloc-int32 {
+            border-color: #009688;
+        }
+
+        .alloc-uint32 {
+            border-color: #009688;
+        }
+
+        .alloc-int64 {
+            border-color: #3F51B5;
+        }
+
+        .alloc-uint64 {
+            border-color: #3F51B5;
+        }
+
+        .alloc-float {
+            border-color: #9C27B0;
+        }
+
+        .alloc-double {
+            border-color: #E91E63;
+        }
+
+        .alloc-longdouble {
+            border-color: #FF5722;
+        }
+
+        form {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        label,
+        select,
+        input {
+            font-size: 14px;
+            margin: 5px;
+        }
+
+        input[type="text"] {
+            padding: 5px;
+            width: 200px;
+        }
+
+        button {
+            padding: 5px 12px;
+            font-size: 14px;
+            cursor: pointer;
+            border: none;
+            background: #2196F3;
+            color: #fff;
+            border-radius: 4px;
+        }
+
+        button:hover {
+            background: #1976D2;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Heap Simulator</h1>
+    <div class="memory" id="memoryGrid"></div>
+    <form id="inputForm">
+        <label for="typeSelect">Type:</label>
+        <select id="typeSelect">
+            <option value="string">String</option>
+            <option value="bool">Boolean</option>
+            <option value="int8">int8_t</option>
+            <option value="uint8">uint8_t</option>
+            <option value="int16">int16_t</option>
+            <option value="uint16">uint16_t</option>
+            <option value="int32">int32_t</option>
+            <option value="uint32">uint32_t</option>
+            <option value="int64">int64_t</option>
+            <option value="uint64">uint64_t</option>
+            <option value="float">float</option>
+            <option value="double">double</option>
+            <option value="longdouble">long double</option>
+        </select>
+        <label for="dataInput">Value:</label>
+        <input type="text" id="dataInput" required>
+        <button type="submit">Store in Heap</button>
+    </form>
+
+    <script>
+        // Total heap size: 64 bytes.
+        const memorySize = 64;
+        // Heap: an array of objects { byte: number, allocation: object|null }.
+        let memory = Array.from({ length: memorySize }, () => ({ byte: 0, allocation: null }));
+
+        // Helper: Return a printable character for a byte.
+        function getChar(byte) {
+            if (byte === 0) return "\\0";
+            if (byte >= 32 && byte < 127) return String.fromCharCode(byte);
+            return ".";
+        }
+
+        // Find a contiguous free block of 'required' bytes; return start index or -1.
+        function findFreeBlock(required) {
+            for (let i = 0; i <= memorySize - required; i++) {
+                let free = true;
+                for (let j = i; j < i + required; j++) {
+                    if (memory[j].allocation !== null) {
+                        free = false;
+                        break;
+                    }
+                }
+                if (free) return i;
+            }
+            return -1;
+        }
+
+        // Render the heap grid.
+        function renderMemory() {
+            const memoryGrid = document.getElementById('memoryGrid');
+            memoryGrid.innerHTML = '';
+            for (let i = 0; i < memorySize; i++) {
+                const cellData = memory[i];
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.setAttribute('data-index', i);
+                if (cellData.allocation) {
+                    cell.classList.add('alloc-' + cellData.allocation.type);
+                }
+                // Display address in hex.
+                const addrDiv = document.createElement('div');
+                addrDiv.className = 'cell-address';
+                addrDiv.textContent = "0x" + i.toString(16).padStart(2, "0");
+                cell.appendChild(addrDiv);
+                // Display byte value (hex).
+                const byteDiv = document.createElement('div');
+                byteDiv.className = 'cell-byte';
+                byteDiv.textContent = cellData.byte.toString(16).toUpperCase().padStart(2, "0");
+                cell.appendChild(byteDiv);
+                // Display ASCII (or marker) for the byte.
+                const charDiv = document.createElement('div');
+                charDiv.className = 'cell-char';
+                charDiv.textContent = getChar(cellData.byte);
+                cell.appendChild(charDiv);
+                // Tooltip with detailed info.
+                const tooltip = document.createElement('div');
+                tooltip.className = 'tooltip';
+                let tooltipText = "Addr: 0x" + i.toString(16).padStart(2, "0") + "<br>" +
+                    "Binary: " + cellData.byte.toString(2).padStart(8, "0") + "<br>" +
+                    "Decimal: " + cellData.byte + "<br>" +
+                    "Char: " + getChar(cellData.byte);
+                if (cellData.allocation) {
+                    if (cellData.allocation.offset === 0) {
+                        tooltipText += "<br>Type: " + cellData.allocation.type + " (" + cellData.allocation.display + ")";
+                    } else {
+                        tooltipText += "<br>Type: " + cellData.allocation.type + " [cont.]";
+                    }
+                }
+                tooltip.innerHTML = tooltipText;
+                cell.appendChild(tooltip);
+
+                // Right-click to free the entire allocation.
+                cell.addEventListener('contextmenu', function (e) {
+                    e.preventDefault();
+                    const index = parseInt(this.getAttribute('data-index'));
+                    if (memory[index].allocation) {
+                        const alloc = memory[index].allocation;
+                        for (let j = alloc.start; j < alloc.start + alloc.length; j++) {
+                            memory[j] = { byte: 0, allocation: null };
+                        }
+                        alert("Freed allocation '" + alloc.type + "' from 0x" +
+                            alloc.start.toString(16).padStart(2, "0") + " to 0x" +
+                            (alloc.start + alloc.length - 1).toString(16).padStart(2, "0") + ".");
+                        renderMemory();
+                    }
+                });
+
+                memoryGrid.appendChild(cell);
+            }
+        }
+
+        renderMemory();
+
+        // Handle form submission: parse the value and convert to an array of bytes.
+        document.getElementById('inputForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+            const type = document.getElementById('typeSelect').value;
+            const inputVal = document.getElementById('dataInput').value.trim();
+            let bytes = [];
+            let allocationDisplay = inputVal;
+
+            switch (type) {
+                case "string":
+                    // Each character becomes a byte; add a terminating null.
+                    for (let i = 0; i < inputVal.length; i++) {
+                        bytes.push(inputVal.charCodeAt(i));
+                    }
+                    bytes.push(0);
+                    break;
+                case "bool":
+                    // Only accept "true" or "false" (case-insensitive).
+                    let lower = inputVal.toLowerCase();
+                    if (lower !== "true" && lower !== "false") {
+                        alert("Boolean input must be 'true' or 'false' (case insensitive).");
+                        return;
+                    }
+                    bytes.push(lower === "true" ? 1 : 0);
+                    allocationDisplay = lower;
+                    break;
+                case "int8": {
+                    let num = Number(inputVal);
+                    if (!Number.isInteger(num)) { alert("Input must be an integer for int8_t."); return; }
+                    if (num < -128 || num > 127) { alert("Value out of range for int8_t."); return; }
+                    if (num < 0) num = 256 + num;
+                    bytes = [num];
+                    break;
+                }
+                case "uint8": {
+                    let num = Number(inputVal);
+                    if (!Number.isInteger(num)) { alert("Input must be an integer for uint8_t."); return; }
+                    if (num < 0 || num > 255) { alert("Value out of range for uint8_t."); return; }
+                    bytes = [num];
+                    break;
+                }
+                case "int16": {
+                    let num = Number(inputVal);
+                    if (!Number.isInteger(num)) { alert("Input must be an integer for int16_t."); return; }
+                    if (num < -32768 || num > 32767) { alert("Value out of range for int16_t."); return; }
+                    if (num < 0) num = 65536 + num;
+                    bytes = [num & 0xFF, (num >> 8) & 0xFF];
+                    break;
+                }
+                case "uint16": {
+                    let num = Number(inputVal);
+                    if (!Number.isInteger(num)) { alert("Input must be an integer for uint16_t."); return; }
+                    if (num < 0 || num > 65535) { alert("Value out of range for uint16_t."); return; }
+                    bytes = [num & 0xFF, (num >> 8) & 0xFF];
+                    break;
+                }
+                case "int32": {
+                    let num = Number(inputVal);
+                    if (!Number.isInteger(num)) { alert("Input must be an integer for int32_t."); return; }
+                    if (num < -2147483648 || num > 2147483647) { alert("Value out of range for int32_t."); return; }
+                    if (num < 0) num = 4294967296 + num;
+                    bytes = [
+                        num & 0xFF,
+                        (num >> 8) & 0xFF,
+                        (num >> 16) & 0xFF,
+                        (num >> 24) & 0xFF
+                    ];
+                    break;
+                }
+                case "uint32": {
+                    let num = Number(inputVal);
+                    if (!Number.isInteger(num)) { alert("Input must be an integer for uint32_t."); return; }
+                    if (num < 0 || num > 4294967295) { alert("Value out of range for uint32_t."); return; }
+                    bytes = [
+                        num & 0xFF,
+                        (num >> 8) & 0xFF,
+                        (num >> 16) & 0xFF,
+                        (num >> 24) & 0xFF
+                    ];
+                    break;
+                }
+                case "int64": {
+                    let num;
+                    try {
+                        num = BigInt(inputVal);
+                    } catch (e) { alert("Invalid integer for int64_t."); return; }
+                    const min = BigInt("-9223372036854775808");
+                    const max = BigInt("9223372036854775807");
+                    if (num < min || num > max) { alert("Value out of range for int64_t."); return; }
+                    if (num < 0) num = BigInt("18446744073709551616") + num;
+                    bytes = [];
+                    for (let i = 0; i < 8; i++) {
+                        bytes.push(Number(num & BigInt(0xFF)));
+                        num = num >> BigInt(8);
+                    }
+                    break;
+                }
+                case "uint64": {
+                    let num;
+                    try {
+                        num = BigInt(inputVal);
+                    } catch (e) { alert("Invalid integer for uint64_t."); return; }
+                    const max = BigInt("18446744073709551615");
+                    if (num < BigInt(0) || num > max) { alert("Value out of range for uint64_t."); return; }
+                    bytes = [];
+                    for (let i = 0; i < 8; i++) {
+                        bytes.push(Number(num & BigInt(0xFF)));
+                        num = num >> BigInt(8);
+                    }
+                    break;
+                }
+                case "float": {
+                    let floatVal = parseFloat(inputVal);
+                    let buffer = new ArrayBuffer(4);
+                    new Float32Array(buffer)[0] = floatVal;
+                    bytes = Array.from(new Uint8Array(buffer));
+                    break;
+                }
+                case "double": {
+                    let doubleVal = parseFloat(inputVal);
+                    let buffer = new ArrayBuffer(8);
+                    new Float64Array(buffer)[0] = doubleVal;
+                    bytes = Array.from(new Uint8Array(buffer));
+                    break;
+                }
+                case "longdouble": {
+                    let ldVal = parseFloat(inputVal);
+                    let buffer = new ArrayBuffer(16);
+                    // Simulate long double by storing a double in the first 8 bytes.
+                    new Float64Array(buffer, 0, 1)[0] = ldVal;
+                    // Remaining 8 bytes remain zero.
+                    bytes = Array.from(new Uint8Array(buffer));
+                    break;
+                }
+                default:
+                    return;
+            }
+
+            // Find a contiguous free block in the heap.
+            const start = findFreeBlock(bytes.length);
+            if (start === -1) {
+                alert("Out of Memory: Not enough free contiguous space to store this value!");
+                return;
+            }
+
+            // Write the bytes into the heap, marking each with allocation metadata.
+            for (let i = 0; i < bytes.length; i++) {
+                memory[start + i] = {
+                    byte: bytes[i],
+                    allocation: {
+                        type: type,
+                        start: start,
+                        offset: i,
+                        length: bytes.length,
+                        display: allocationDisplay
+                    }
+                };
+            }
+
+            renderMemory();
+            document.getElementById('dataInput').value = '';
+        });
+    </script>
+</body>
+</html>
